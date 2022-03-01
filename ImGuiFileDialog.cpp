@@ -2834,13 +2834,11 @@ namespace IGFD
 			prDisplayMode = DisplayModeEnum::THUMBNAILS_LIST;
 		if (ImGui::IsItemHovered())	ImGui::SetTooltip(DisplayMode_ThumbailsList_ButtonHelp);
 		ImGui::SameLine();
-		/* todo
 		if (IMGUI_RADIO_BUTTON(DisplayMode_ThumbailsGrid_ButtonString,
 			prDisplayMode == DisplayModeEnum::THUMBNAILS_GRID))
 			prDisplayMode = DisplayModeEnum::THUMBNAILS_GRID;
 		if (ImGui::IsItemHovered())	ImGui::SetTooltip(DisplayMode_ThumbailsGrid_ButtonHelp);
 		ImGui::SameLine();
-		*/
 		prDrawThumbnailGenerationProgress();
 	}
 
@@ -4765,11 +4763,271 @@ namespace IGFD
 		ImGui::PopID();
 	}
 
+	inline int CalcGlyphsCountAndSize(
+		const uint32_t& vCountFiles,			/* vount files						*/	
+		ImVec2& vCellSize,						/* cell size						*/
+		ImVec2& vGlyphSize						/* glyph size (cell - paddings)		*/)
+	{
+		float aw = ImGui::GetContentRegionAvail().x;
+
+		int glyphCount = vCountFiles;
+		float glyphWidth = 100.0;// float)vProjectFile->m_Preview_Glyph_Width;
+
+		// GlyphSize est Menant, puis glyphCount est appliqué
+		//if (vProjectFile->m_GlyphDisplayTuningMode & GlyphDisplayTuningModeFlags::GLYPH_DISPLAY_TUNING_MODE_GLYPH_SIZE)
+		//{
+			glyphCount = (int)(aw / ImMax(glyphWidth, 1.0f));
+			glyphWidth = aw / (float)ImMax((float)glyphCount, 1.0f);
+			/*if (vProjectFile->m_GlyphSizePolicyChangeFromWidgetUse)
+			{
+				vProjectFile->m_Preview_Glyph_CountX = glyphCount;
+			}*/
+		//}
+		// GlyphCount est Menant, dont m_Preview_Glyph_CountX n'est jamais réécrit en dehors du user
+		//else if (vProjectFile->m_GlyphDisplayTuningMode & GlyphDisplayTuningModeFlags::GLYPH_DISPLAY_TUNING_MODE_GLYPH_COUNT)
+		//{
+			//glyphWidth = aw / (float)ImMax(glyphCount, 1);
+			/*if (vProjectFile->m_GlyphSizePolicyChangeFromWidgetUse)
+			{
+				vProjectFile->m_Preview_Glyph_Width = glyphWidth;
+			}*/
+		//}
+
+		if (glyphCount > 0)
+		{
+			vCellSize = ImVec2(glyphWidth, glyphWidth);
+			vGlyphSize = vCellSize;
+		}
+
+		return glyphCount;
+	}
+
+	inline void RenderFileIcon(
+		ImFont* vFont, ImDrawList* vDrawList, 
+		float vGlyphHeight, ImVec2 vMin, ImVec2 vMax, 
+		ImVec2 vOffset, ImVec2 vTranslation, ImVec2 vScale, bool vZoomed)
+	{
+		if (vFont && vFont->ContainerAtlas && vDrawList && vGlyphHeight > 0.0f) // (vGlyphSize > 0.0 for avoid div by zero)
+		{
+			const ImFontGlyph* glyph = vFont->FindGlyph(vGlyphCodePoint);
+			if (!glyph || !glyph->Visible)
+				return;
+
+			float scale = (vGlyphHeight >= 0.0f) ? (vGlyphHeight / vFont->FontSize) : 1.0f;
+			//vPos.x = IM_FLOOR(vPos.x);
+			//vPos.y = IM_FLOOR(vPos.y);
+
+			ImVec2 pMin(0, 0), pMax(0, 0);
+
+			if (vZoomed)
+			{
+				ImVec2 gSize = ImVec2(glyph->X1 - glyph->X0, glyph->Y1 - glyph->Y0);
+				if (IS_FLOAT_EQUAL(gSize.y, 0.0f))
+					return;
+				float ratioX = gSize.x / gSize.y;
+				float newX = vGlyphHeight * ratioX;
+				gSize = ImVec2(vGlyphHeight, vGlyphHeight / ratioX) * 0.5f;
+				if (newX < vGlyphHeight)
+					gSize = ImVec2(newX, vGlyphHeight) * 0.5f;
+				ImVec2 center = ImRect(vMin, vMax).GetCenter();
+
+				pMin = center - gSize;
+				pMax = center + gSize;
+			}
+			else
+			{
+				pMin = ImVec2(vMin.x + vOffset.x + glyph->X0 * scale * vScale.x + vTranslation.x, vMin.y + vOffset.y + glyph->Y0 * scale * vScale.y - vTranslation.y);
+				pMax = ImVec2(vMin.x + vOffset.x + glyph->X1 * scale * vScale.x + vTranslation.x, vMin.y + vOffset.y + glyph->Y1 * scale * vScale.y - vTranslation.y);
+			}
+
+			ImVec2 uv0 = ImVec2(glyph->U0, glyph->V0);
+			ImVec2 uv1 = ImVec2(glyph->U1, glyph->V1);
+
+			vDrawList->PushTextureID(vFont->ContainerAtlas->TexID);
+			vDrawList->PrimReserve(6, 4);
+			vDrawList->PrimRectUV(pMin, pMax, uv0, uv1, vCol);
+			vDrawList->PopTextureID();
+		}
+	}
+
+	inline int DrawFileButton(
+		int& vWidgetPushId, // by adress because we want modify it
+		ImFont* vFont,
+		bool* vSelected, ImVec2 vGlyphSize, const ImFontGlyph* vGlyph,
+		ImVec4 vGlyphButtonStateColor[3], bool vColored,
+		ImVec2 vTranslation, ImVec2 vScale,
+		int frame_padding, float vRectThickNess, ImVec4 vRectColor)
+	{
+		int res = 0;
+
+		if (vFont && vGlyph)
+		{
+			ImGuiWindow* window = ImGui::GetCurrentWindow();
+			if (window->SkipItems)
+				return false;
+
+			ImGuiContext& g = *GImGui;
+			const ImGuiStyle& style = g.Style;
+
+			ImGui::PushID(++vWidgetPushId);
+			ImGui::PushID((void*)(intptr_t)vFont->ContainerAtlas->TexID);
+			const ImGuiID id = window->GetID("#image");
+			ImGui::PopID();
+			ImGui::PopID();
+
+			const ImVec2 padding = (frame_padding >= 0) ? ImVec2((float)frame_padding, (float)frame_padding) : style.FramePadding;
+			ImRect bb(window->DC.CursorPos, window->DC.CursorPos + vGlyphSize + padding * 2);
+			ImGui::ItemSize(bb);
+			if (!ImGui::ItemAdd(bb, id))
+				return false;
+
+			bool hovered, held;
+			bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			if (pressed)
+			{
+				if (vSelected)
+				{
+					*vSelected = !*vSelected;
+				}
+
+				if (g.ActiveIdMouseButton == 0) // left click
+					res = 1;
+				if (g.ActiveIdMouseButton == 1) // right click
+					res = 2;
+			}
+
+			// Render
+
+			const ImU32 colButton = ImGui::GetColorU32(((held && hovered) || (vSelected && *vSelected)) ?
+				vGlyphButtonStateColor[2] : hovered ? vGlyphButtonStateColor[1] : vGlyphButtonStateColor[0]);
+			ImGui::RenderNavHighlight(bb, id);
+
+			const float rounding = ImClamp((float)ImMin(padding.x, padding.y), 0.0f, style.FrameRounding);
+#ifdef USE_SHADOW
+			if (!ThemeHelper::m_UseShadow)
+			{
+#endif
+				// normal
+				ImGui::RenderFrame(bb.Min, bb.Max, colButton, true, rounding);
+#ifdef USE_SHADOW
+			}
+			else
+			{
+				if (ThemeHelper::m_UseTextureForShadow)
+				{
+					ImTextureID texId = (ImTextureID)AssetManager::Instance()->m_Textures["btn"].glTex;
+					window->DrawList->AddImage(texId, bb.Min, bb.Max, ImVec2(0, 0), ImVec2(1, 1), col);
+				}
+				else
+				{
+					// inner shadow
+					ImVec4 cb = ImColor(col).Value; // color base : cb
+					float sha = ThemeHelper::Instance()->m_ShadowStrength;
+					ImVec4 cbd = ImVec4(cb.x * sha, cb.y * sha, cb.z * sha, cb.w * 0.9f); // color base darker : cbd
+					ImGui::RenderInnerShadowFrame(bb.Min, bb.Max, col, ImGui::GetColorU32(cbd), ImGui::GetColorU32(ImGuiCol_WindowBg), true, rounding);
+				}
+			}
+			ImGui::AddInvertedRectFilled(window->DrawList, bb.Min, bb.Max, ImGui::GetColorU32(ImGuiCol_WindowBg), rounding, ImDrawCornerFlags_All);
+#endif
+
+			// double codepoint / name rect display
+			if (vRectThickNess > 0.0f)
+			{
+				window->DrawList->AddRect(bb.Min, bb.Max, ImGui::GetColorU32(vRectColor), 0.0, 15, vRectThickNess);
+			}
+
+			ImGui::PushClipRect(bb.Min, bb.Max, true);
+
+			bb.Min += style.FramePadding;
+			bb.Max -= style.FramePadding;
+
+			ImVec2 pScale = vGlyphSize / vFont->FontSize;
+			float adv = vGlyph->AdvanceX * pScale.y;
+			float offsetX = bb.GetSize().x * 0.5f - adv * 0.5f; // horizontal centering of the glyph
+			ImVec2 trans = vTranslation * pScale;
+			ImVec2 scale = vScale;
+
+			RenderFileIcon(vFont, window->DrawList,
+				vGlyphSize.y,
+				bb.Min, bb.Max, ImVec2(offsetX, 0),
+				(ImWchar)vGlyph->Codepoint,
+				trans, scale);
+
+			ImGui::PopClipRect();
+		}
+
+		return res;
+	}
+
 	void IGFD::FileDialog::prDrawThumbnailsGridView(ImVec2 vSize)
 	{
 		if (ImGui::BeginChild("##thumbnailsGridsFiles", vSize))
 		{
-			// todo
+			auto& fdi = prFileDialogInternal.puFileManager;
+
+			if (!fdi.IsFilteredListEmpty())
+			{
+				std::string _str;
+				ImFont* _font = nullptr;
+				bool _showColor = false;
+
+				uint32_t countFiles = (uint32_t)fdi.GetFilteredListSize();
+
+				ImVec2 cell_size, glyph_size;
+				uint32_t fileCountX = CalcGlyphsCountAndSize(countFiles, cell_size, glyph_size);
+				if (fileCountX)
+				{
+					uint32_t idx = 0;
+					
+					int rowCount = (int)ceil((double)countFiles / (double)fileCountX);
+
+					prFileListClipper.Begin(rowCount, cell_size.y);
+					while (prFileListClipper.Step())
+					{
+						for (int j = prFileListClipper.DisplayStart; j < prFileListClipper.DisplayEnd; ++j)
+						{
+							if (j < 0) continue;
+
+							for (uint32_t i = 0; i < fileCountX; i++)
+							{
+								uint32_t glyphIdx = i + j * fileCountX;
+								if (glyphIdx < countFiles)
+								{
+									auto infos = fdi.GetFilteredFileAt((size_t)glyphIdx);
+									if (!infos.use_count())
+										continue;
+
+									uint32_t x = idx++ % fileCountX;
+
+									if (x) ImGui::SameLine();
+
+									prBeginFileColorIconStyle(infos, _showColor, _str, &_font);
+
+									bool selected = fdi.IsFileNameSelected(infos->fileNameExt); // found
+
+									auto th = &infos->thumbnailInfo;
+
+									if (!th->isLoadingOrLoaded)
+									{
+										prAddThumbnailToLoad(infos);
+									}
+									if (th->isReadyToDisplay &&
+										th->textureID &&
+										th->textureHeight > 0)
+									{
+										ImGui::BeginGroup();
+										float ratio = th->textureHeight / th->textureWidth;
+										ImGui::Image((ImTextureID)th->textureID, ImVec2(glyph_size.x * ratio, glyph_size.y));
+									}
+
+									prEndFileColorIconStyle(_showColor, _font);
+								}
+							}
+						}
+					}
+					prFileListClipper.End();
+				}
+			}
 		}
 
 		ImGui::EndChild();
