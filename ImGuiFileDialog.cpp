@@ -234,6 +234,7 @@ namespace IGFD
 #ifndef DateTimeFormat
 #define DateTimeFormat "%Y/%m/%d %H:%M"
 #endif // DateTimeFormat
+
 #ifdef USE_THUMBNAILS
 #ifndef tableHeaderFileThumbnailsString
 #define tableHeaderFileThumbnailsString "Thumbnails"
@@ -285,7 +286,19 @@ namespace IGFD
 	}
 #define IMGUI_RADIO_BUTTON inRadioButton
 #endif // IMGUI_RADIO_BUTTON
+#ifndef DisplayMode_ThumbailsGrid_ThreadSleepTimeInMS
+#define DisplayMode_ThumbailsGrid_ThreadSleepTimeInMS 500
+#endif // DisplayMode_ThumbailsGrid_ThreadSleepTimeInMS
+/*
+#ifndef DisplayMode_ThumbailsGrid_ThumbsSizePolicy
+#define DisplayMode_ThumbailsGrid_ThumbsSizePolicy // ThumbWidth is Leading, then ThumbsCountX is applied
+#endif // DisplayMode_ThumbailsGrid_ThumbsSizePolicy
+#ifndef DisplayMode_ThumbailsGrid_ThumbsCountPolicy
+#define DisplayMode_ThumbailsGrid_ThumbsCountPolicy // ThumbsCountX is Leading
+#endif // DisplayMode_ThumbailsGrid_ThumbsCountPolicy
+*/
 #endif  // USE_THUMBNAILS
+
 #ifdef USE_BOOKMARK
 #ifndef defaultBookmarkPaneWith
 #define defaultBookmarkPaneWith 150.0f
@@ -2642,6 +2655,7 @@ namespace IGFD
 
 #ifdef USE_THUMBNAILS
 		prStartThumbnailFileDatasExtraction();
+		prThumbWidthChangedFromWidgetUse = false;
 #endif
 	}
 
@@ -2698,7 +2712,13 @@ namespace IGFD
 		// infinite loop while is thread working
 		while(prIsWorking)
 		{
-			if (!prThumbnailFileDatasToGet.empty())
+			if (prThumbnailFileDatasToGet.empty())
+			{
+				std::this_thread::sleep_for(
+					std::chrono::milliseconds(
+						DisplayMode_ThumbailsGrid_ThreadSleepTimeInMS));
+			}
+			else
 			{
 				std::shared_ptr<FileInfos> file = nullptr;
 				prThumbnailFileDatasToGetMutex.lock();
@@ -2734,10 +2754,10 @@ namespace IGFD
 								{
 									// resize with respect to glyph ratio
 									const float ratioX = (float)w / (float)h;
-									const float newX = DisplayMode_ThumbailsList_ImageHeight * ratioX;
+									const float newX = prPreferedTrueTextureHeight * ratioX;
 									float newY = w / ratioX;
 									if (newX < w) 
-										newY = DisplayMode_ThumbailsList_ImageHeight;
+										newY = prPreferedTrueTextureHeight;
 
 									const auto newWidth = (int)newX;
 									const auto newHeight = (int)newY;
@@ -2783,10 +2803,6 @@ namespace IGFD
 					prThumbnailFileDatasToGetMutex.unlock();
 				}
 			}
-			else
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-			}
 		}
 	}
 
@@ -2814,6 +2830,60 @@ namespace IGFD
 				ImGui::SameLine();
 			}
 		}
+	}
+
+	int32_t IGFD::ThumbnailFeature::prCalcGridThumbsCountAndSize(
+		int32_t vThumbsCountX, float vThumbsWidth, ImVec2& vCellSize)
+	{
+		float aw = ImGui::GetContentRegionAvail().x;
+		
+		int thCountX = vThumbsCountX;
+		float thWidth = vThumbsWidth;
+
+		if (prGridModeWidthPolicieLeading) {
+			thCountX = (int)(aw / ImMax(thWidth, 1.0f));
+		}
+		
+		ImGui::PushMultiItemsWidths(thCountX, aw);
+		thWidth = ImMax(ImGui::GetCurrentWindow()->DC.ItemWidth, 10.0f);
+		ImGui::GetCurrentWindow()->DC.ItemWidth;
+
+		if (prThumbWidthChangedFromWidgetUse) {
+			if (prGridModeWidthPolicieLeading) {
+				prThumbnailsCountX = thCountX;
+			}
+			else {
+				prThumbnailsWidth = thWidth;
+			}
+		}
+
+		if (thCountX > 0) {
+			vCellSize = ImVec2(thWidth, thWidth);
+			vCellSize.y += ImGui::GetTextLineHeight() * 2.0f; // two lines of text
+		}
+
+		return thCountX;
+	}
+
+	void IGFD::ThumbnailFeature::prDrawThumbnailGridSliders()
+	{
+		float aw = ImGui::GetContentRegionAvail().x;
+		
+		ImGui::PushMultiItemsWidths(2, aw);
+		if (ImGui::SliderInt("Count X", &prThumbnailsCountX, 50, 1))
+		{
+			prGridModeWidthPolicieLeading = false;
+			prThumbnailsCountX = (prThumbnailsCountX > 1 ? prThumbnailsCountX : 1);
+			prThumbWidthChangedFromWidgetUse = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SliderFloat("Width", &prThumbnailsWidth, 10.0f, 300.0f))
+		{
+			prGridModeWidthPolicieLeading = true;
+			prThumbnailsWidth = ImMax(prThumbnailsWidth, 10.0f); // can prevent bugs (like div by zero) everywhere when user input value
+			prThumbWidthChangedFromWidgetUse = true;
+		}
+		ImGui::PopItemWidth();
 	}
 
 	void IGFD::ThumbnailFeature::prAddThumbnailToLoad(const std::shared_ptr<FileInfos>& vFileInfos)
@@ -2874,13 +2944,12 @@ namespace IGFD
 			prDisplayMode = DisplayModeEnum::THUMBNAILS_LIST;
 		if (ImGui::IsItemHovered())	ImGui::SetTooltip(DisplayMode_ThumbailsList_ButtonHelp);
 		ImGui::SameLine();
-		/* todo
 		if (IMGUI_RADIO_BUTTON(DisplayMode_ThumbailsGrid_ButtonString,
 			prDisplayMode == DisplayModeEnum::THUMBNAILS_GRID))
 			prDisplayMode = DisplayModeEnum::THUMBNAILS_GRID;
 		if (ImGui::IsItemHovered())	ImGui::SetTooltip(DisplayMode_ThumbailsGrid_ButtonHelp);
 		ImGui::SameLine();
-		*/
+
 		prDrawThumbnailGenerationProgress();
 	}
 
@@ -3365,166 +3434,6 @@ namespace IGFD
 				}
 			}
 		}
-	}
-
-	bool IGFD::KeyExplorerFeature::prFlashableSelectable(const char* label, bool selected,
-		ImGuiSelectableFlags flags, bool vFlashing, const ImVec2& size_arg)
-	{
-		using namespace ImGui;
-
-		ImGuiWindow* window = GetCurrentWindow();
-		if (window->SkipItems)
-			return false;
-
-		ImGuiContext& g = *GImGui;
-		const ImGuiStyle& style = g.Style;
-
-		// Submit label or explicit size to ItemSize(), whereas ItemAdd() will submit a larger/spanning rectangle.
-		ImGuiID id = window->GetID(label);
-		ImVec2 label_size = CalcTextSize(label, nullptr, true);
-		ImVec2 size(size_arg.x != 0.0f ? size_arg.x : label_size.x, size_arg.y != 0.0f ? size_arg.y : label_size.y); //-V550
-		ImVec2 pos = window->DC.CursorPos;
-		pos.y += window->DC.CurrLineTextBaseOffset;
-		ItemSize(size, 0.0f);
-
-		// Fill horizontal space
-		// We don't support (size < 0.0f) in Selectable() because the ItemSpacing extension would make explicitly right-aligned sizes not visibly match other widgets.
-		const bool span_all_columns = (flags & ImGuiSelectableFlags_SpanAllColumns) != 0;
-		const float min_x = span_all_columns ? window->ParentWorkRect.Min.x : pos.x;
-		const float max_x = span_all_columns ? window->ParentWorkRect.Max.x : window->WorkRect.Max.x;
-		if (fabs(size_arg.x) < FLT_EPSILON || (flags & ImGuiSelectableFlags_SpanAvailWidth))
-			size.x = ImMax(label_size.x, max_x - min_x);
-
-		// Text stays at the submission position, but bounding box may be extended on both sides
-		const ImVec2 text_min = pos;
-		const ImVec2 text_max(min_x + size.x, pos.y + size.y);
-
-		// Selectables are meant to be tightly packed together with no click-gap, so we extend their box to cover spacing between selectable.
-		ImRect bb(min_x, pos.y, text_max.x, text_max.y);
-		if ((flags & ImGuiSelectableFlags_NoPadWithHalfSpacing) == 0)
-		{
-			const float spacing_x = span_all_columns ? 0.0f : style.ItemSpacing.x;
-			const float spacing_y = style.ItemSpacing.y;
-			const float spacing_L = IM_FLOOR(spacing_x * 0.50f);
-			const float spacing_U = IM_FLOOR(spacing_y * 0.50f);
-			bb.Min.x -= spacing_L;
-			bb.Min.y -= spacing_U;
-			bb.Max.x += (spacing_x - spacing_L);
-			bb.Max.y += (spacing_y - spacing_U);
-		}
-		//if (g.IO.KeyCtrl) { GetForegroundDrawList()->AddRect(bb.Min, bb.Max, IM_COL32(0, 255, 0, 255)); }
-
-		// Modify ClipRect for the ItemAdd(), faster than doing a PushColumnsBackground/PushTableBackground for every Selectable..
-		const float backup_clip_rect_min_x = window->ClipRect.Min.x;
-		const float backup_clip_rect_max_x = window->ClipRect.Max.x;
-		if (span_all_columns)
-		{
-			window->ClipRect.Min.x = window->ParentWorkRect.Min.x;
-			window->ClipRect.Max.x = window->ParentWorkRect.Max.x;
-		}
-
-		bool item_add;
-		const bool disabled_item = (flags & ImGuiSelectableFlags_Disabled) != 0;
-		if (disabled_item)
-		{
-			ImGuiItemFlags backup_item_flags = g.CurrentItemFlags;
-			g.CurrentItemFlags |= ImGuiItemFlags_Disabled;
-			item_add = ItemAdd(bb, id);
-			g.CurrentItemFlags = backup_item_flags;
-		}
-		else
-		{
-			item_add = ItemAdd(bb, id);
-		}
-
-		if (span_all_columns)
-		{
-			window->ClipRect.Min.x = backup_clip_rect_min_x;
-			window->ClipRect.Max.x = backup_clip_rect_max_x;
-		}
-
-		if (!item_add)
-			return false;
-
-		const bool disabled_global = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
-		if (disabled_item && !disabled_global) // Only testing this as an optimization
-			BeginDisabled(true);
-
-		// FIXME: We can standardize the behavior of those two, we could also keep the fast path of override ClipRect + full push on render only,
-		// which would be advantageous since most selectable are not selected.
-		if (span_all_columns && window->DC.CurrentColumns)
-			PushColumnsBackground();
-		else if (span_all_columns && g.CurrentTable)
-			TablePushBackgroundChannel();
-
-		// We use NoHoldingActiveID on menus so user can click and _hold_ on a menu then drag to browse child entries
-		ImGuiButtonFlags button_flags = 0;
-		if (flags & ImGuiSelectableFlags_NoHoldingActiveID) { button_flags |= ImGuiButtonFlags_NoHoldingActiveId; }
-		if (flags & ImGuiSelectableFlags_SelectOnClick) { button_flags |= ImGuiButtonFlags_PressedOnClick; }
-		if (flags & ImGuiSelectableFlags_SelectOnRelease) { button_flags |= ImGuiButtonFlags_PressedOnRelease; }
-		if (flags & ImGuiSelectableFlags_AllowDoubleClick) { button_flags |= ImGuiButtonFlags_PressedOnClickRelease | ImGuiButtonFlags_PressedOnDoubleClick; }
-		if (flags & ImGuiSelectableFlags_AllowItemOverlap) { button_flags |= ImGuiButtonFlags_AllowItemOverlap; }
-
-		const bool was_selected = selected;
-		bool hovered, held;
-		bool pressed = ButtonBehavior(bb, id, &hovered, &held, button_flags);
-
-		// Auto-select when moved into
-		// - This will be more fully fleshed in the range-select branch
-		// - This is not exposed as it won't nicely work with some user side handling of shift/control
-		// - We cannot do 'if (g.NavJustMovedToId != id) { selected = false; pressed = was_selected; }' for two reasons
-		//   - (1) it would require focus scope to be set, need exposing PushFocusScope() or equivalent (e.g. BeginSelection() calling PushFocusScope())
-		//   - (2) usage will fail with clipped items
-		//   The multi-select API aim to fix those issues, e.g. may be replaced with a BeginSelection() API.
-		if ((flags & ImGuiSelectableFlags_SelectOnNav) && g.NavJustMovedToId != 0 && g.NavJustMovedToFocusScopeId == window->DC.NavFocusScopeIdCurrent)
-			if (g.NavJustMovedToId == id)
-				selected = pressed = true;
-
-		// Update NavId when clicking or when Hovering (this doesn't happen on most widgets), so navigation can be resumed with gamepad/keyboard
-		if (pressed || (hovered && (flags & ImGuiSelectableFlags_SetNavIdOnHover)))
-		{
-			if (!g.NavDisableMouseHover && g.NavWindow == window && g.NavLayer == window->DC.NavLayerCurrent)
-			{
-				SetNavID(id, window->DC.NavLayerCurrent, window->DC.NavFocusScopeIdCurrent, ImRect(bb.Min - window->Pos, bb.Max - window->Pos));
-				g.NavDisableHighlight = true;
-			}
-		}
-		if (pressed)
-			MarkItemEdited(id);
-
-		if (flags & ImGuiSelectableFlags_AllowItemOverlap)
-			SetItemAllowOverlap();
-
-		// In this branch, Selectable() cannot toggle the selection so this will never trigger.
-		if (selected != was_selected) //-V547
-			g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_ToggledSelection;
-
-		// Render
-		if ((held && (flags & ImGuiSelectableFlags_DrawHoveredWhenHeld)) || vFlashing)
-			hovered = true;
-		if (hovered || selected)
-		{
-			const ImU32 col = GetColorU32((held && hovered) ? ImGuiCol_HeaderActive : hovered ? ImGuiCol_HeaderHovered : ImGuiCol_Header);
-			RenderFrame(bb.Min, bb.Max, col, false, 0.0f);
-		}
-		RenderNavHighlight(bb, id, ImGuiNavHighlightFlags_TypeThin | ImGuiNavHighlightFlags_NoRounding);
-
-		if (span_all_columns && window->DC.CurrentColumns)
-			PopColumnsBackground();
-		else if (span_all_columns && g.CurrentTable)
-			TablePopBackgroundChannel();
-
-		RenderTextClipped(text_min, text_max, label, nullptr, &label_size, style.SelectableTextAlign, &bb);
-
-		// Automatically close popups
-		if (pressed && (window->Flags & ImGuiWindowFlags_Popup) && !(flags & ImGuiSelectableFlags_DontClosePopups) && !(g.LastItemData.InFlags & ImGuiItemFlags_SelectableDontClosePopup))
-			CloseCurrentPopup();
-
-		if (disabled_item && !disabled_global)
-			EndDisabled();
-
-		IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
-		return pressed; //-V1020
 	}
 
 	void IGFD::KeyExplorerFeature::prStartFlashItem(size_t vIdx)
@@ -4067,6 +3976,14 @@ namespace IGFD
 #endif // USE_THUMBNAILS
 
 		prFileDialogInternal.puSearchManager.DrawSearchBar(prFileDialogInternal);
+
+#ifdef USE_THUMBNAILS
+		if (prDisplayMode == DisplayModeEnum::THUMBNAILS_GRID &&
+			!(prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
+		{
+			prDrawThumbnailGridSliders();
+		}
+#endif // USE_THUMBNAILS
 	}
 
 	void IGFD::FileDialog::prDrawContent()
@@ -4320,43 +4237,57 @@ namespace IGFD
 		return res;
 	}
 
-	void IGFD::FileDialog::prSelectableItem(int vidx, std::shared_ptr<FileInfos> vInfos, bool vSelected, const char* vFmt, ...)
+	void IGFD::FileDialog::prSelectableItem(const int& vidx, const ImVec2& vCellSize, std::shared_ptr<FileInfos> vInfosPtr, const bool& vSelected, const char* vFmt, ...)
 	{
-		if (!vInfos.use_count())
+		if (!vInfosPtr)
 			return;
 
 		auto& fdi = prFileDialogInternal.puFileManager;
 
-		static ImGuiSelectableFlags selectableFlags = ImGuiSelectableFlags_AllowDoubleClick |
-			ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_SpanAvailWidth;
+		ImGuiSelectableFlags selectableFlags = ImGuiSelectableFlags_AllowDoubleClick;
+
+#ifdef USE_THUMBNAILS
+		if (prDisplayMode != DisplayModeEnum::THUMBNAILS_GRID || (prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
+#endif // USE_THUMBNAILS
+		{
+			selectableFlags |= ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_SpanAvailWidth;
+		}
 
 		va_list args;
 		va_start(args, vFmt);
 		vsnprintf(fdi.puVariadicBuffer, MAX_FILE_DIALOG_NAME_BUFFER, vFmt, args);
 		va_end(args);
 
-		float h = 0.0f;
+		ImVec2 cellSize = vCellSize;
 #ifdef USE_THUMBNAILS
-		if (prDisplayMode == DisplayModeEnum::THUMBNAILS_LIST &&
-			!(prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
+		if (!(prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
 		{
-			h = DisplayMode_ThumbailsList_ImageHeight;
+			if (prDisplayMode == DisplayModeEnum::THUMBNAILS_LIST)
+			{
+				cellSize.y = DisplayMode_ThumbailsList_ImageHeight;
+			}
 		}
 #endif // USE_THUMBNAILS
+
+#if defined(USE_EXPLORATION_BY_KEYS) || defined(USE_THUMBNAILS)
 #ifdef USE_EXPLORATION_BY_KEYS
 		bool flashed = prBeginFlashItem((size_t)vidx);
 		bool res = prFlashableSelectable(fdi.puVariadicBuffer, vSelected, selectableFlags,
-			flashed, ImVec2(-1.0f, h));
+			flashed, cellSize);
 		if (flashed)
 			prEndFlashItem();
+#else
+		bool res = prFlashableSelectable(vInfosPtr, fdi.puVariadicBuffer, vSelected, selectableFlags,
+			false, cellSize);
+#endif
 #else // USE_EXPLORATION_BY_KEYS
 		(void)vidx; // remove a warnings ofr unused var
 
-		bool res = ImGui::Selectable(fdi.puVariadicBuffer, vSelected, selectableFlags, ImVec2(-1.0f, h));
+		bool res = ImGui::Selectable(fdi.puVariadicBuffer, vSelected, selectableFlags, cellSize);
 #endif // USE_EXPLORATION_BY_KEYS
 		if (res)
 		{
-			if (vInfos->fileType.isDir())
+			if (vInfosPtr->fileType.isDir())
 			{
 				// nav system, selectable cause open directory or select directory
 				if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard)
@@ -4364,32 +4295,32 @@ namespace IGFD
 					// little fix for get back the mouse behavior in nav system
 					if (ImGui::IsMouseDoubleClicked(0)) // 0 -> left mouse button double click
 					{
-						fdi.puPathClicked = fdi.SelectDirectory(vInfos);
+						fdi.puPathClicked = fdi.SelectDirectory(vInfosPtr);
 					}
 					else if (fdi.puDLGDirectoryMode) // directory chooser
 					{
-						fdi.SelectFileName(prFileDialogInternal, vInfos);
+						fdi.SelectFileName(prFileDialogInternal, vInfosPtr);
 					}
 					else
 					{
-						fdi.puPathClicked = fdi.SelectDirectory(vInfos);
+						fdi.puPathClicked = fdi.SelectDirectory(vInfosPtr);
 					}
 				}
 				else // no nav system => classic behavior
 				{
 					if (ImGui::IsMouseDoubleClicked(0)) // 0 -> left mouse button double click
 					{
-						fdi.puPathClicked = fdi.SelectDirectory(vInfos);
+						fdi.puPathClicked = fdi.SelectDirectory(vInfosPtr);
 					}
 					else if (fdi.puDLGDirectoryMode) // directory chooser
 					{
-						fdi.SelectFileName(prFileDialogInternal, vInfos);
+						fdi.SelectFileName(prFileDialogInternal, vInfosPtr);
 					}
 				}
 			}
 			else
 			{
-				fdi.SelectFileName(prFileDialogInternal, vInfos);
+				fdi.SelectFileName(prFileDialogInternal, vInfosPtr);
 
 				if (ImGui::IsMouseDoubleClicked(0))
 				{
@@ -4404,19 +4335,26 @@ namespace IGFD
 		vOutStr.clear();
 		vOutShowColor = false;
 
-		if (vFileInfos->fileStyle.use_count()) //-V807 //-V522
+		if (vFileInfos->fileStyle) //-V807 //-V522
 		{
 			vOutShowColor = true;
-
 			*vOutFont = vFileInfos->fileStyle->font;
 		}
 
+		// here this conditional cant fail because if vOutShowColor is true, vFileInfos->fileStyle is not null.. :)
 		if (vOutShowColor && !vFileInfos->fileStyle->icon.empty()) vOutStr = vFileInfos->fileStyle->icon;
 		else if (vFileInfos->fileType.isDir()) vOutStr = dirEntryString;
 		else if (vFileInfos->fileType.isLinkToUnknown()) vOutStr = linkEntryString;
 		else if (vFileInfos->fileType.isFile()) vOutStr = fileEntryString;
 
-		vOutStr += " " + vFileInfos->fileNameExt;
+		if (prDisplayMode != DisplayModeEnum::THUMBNAILS_GRID || (prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
+		{
+			vOutStr += " " + vFileInfos->fileNameExt;
+		}
+		else
+		{
+			vOutStr += "\n" + vFileInfos->fileNameExt;
+		}
 
 		if (vOutShowColor)
 			ImGui::PushStyleColor(ImGuiCol_Text, vFileInfos->fileStyle->color);
@@ -4562,29 +4500,29 @@ namespace IGFD
 					{
 						if (i < 0) continue;
 
-						auto infos = fdi.GetFilteredFileAt((size_t)i);
-						if (!infos.use_count())
+						auto infosPtr = fdi.GetFilteredFileAt((size_t)i);
+						if (!infosPtr)
 							continue;
 
-						prBeginFileColorIconStyle(infos, _showColor, _str, &_font);
+						prBeginFileColorIconStyle(infosPtr, _showColor, _str, &_font);
 					
-						bool selected = fdi.IsFileNameSelected(infos->fileNameExt); // found
+						bool selected = fdi.IsFileNameSelected(infosPtr->fileNameExt); // found
 
 						ImGui::TableNextRow();
 
 						if (ImGui::TableNextColumn()) // file name
 						{
-							prSelectableItem(i, infos, selected, _str.c_str());
+							prSelectableItem(i, ImVec2(-1.0f, 0.0f), infosPtr, selected, _str.c_str());
 						}
 						if (ImGui::TableNextColumn()) // file type
 						{
-							ImGui::Text("%s", infos->fileExt.c_str());
+							ImGui::Text("%s", infosPtr->fileExt.c_str());
 						}
 						if (ImGui::TableNextColumn()) // file size
 						{
-							if (!infos->fileType.isDir())
+							if (!infosPtr->fileType.isDir())
 							{
-								ImGui::Text("%s ", infos->formatedFileSize.c_str());
+								ImGui::Text("%s ", infosPtr->formatedFileSize.c_str());
 							}
 							else
 							{
@@ -4593,7 +4531,7 @@ namespace IGFD
 						}
 						if (ImGui::TableNextColumn()) // file date + time
 						{
-							ImGui::Text("%s", infos->fileModifDate.c_str());
+							ImGui::Text("%s", infosPtr->fileModifDate.c_str());
 						}
 
 						prEndFileColorIconStyle(_showColor, _font);
@@ -4774,29 +4712,29 @@ namespace IGFD
 					{
 						if (i < 0) continue;
 
-						auto infos = fdi.GetFilteredFileAt((size_t)i);
-						if (!infos.use_count())
+						auto infosPtr = fdi.GetFilteredFileAt((size_t)i);
+						if (!infosPtr)
 							continue;
 
-						prBeginFileColorIconStyle(infos, _showColor, _str, &_font);
+						prBeginFileColorIconStyle(infosPtr, _showColor, _str, &_font);
 
-						bool selected = fdi.IsFileNameSelected(infos->fileNameExt); // found
+						bool selected = fdi.IsFileNameSelected(infosPtr->fileNameExt); // found
 
 						ImGui::TableNextRow();
 
 						if (ImGui::TableNextColumn()) // file name
 						{
-							prSelectableItem(i, infos, selected, _str.c_str());
+							prSelectableItem(i, ImVec2(-1.0f, 0.0f), infosPtr, selected, _str.c_str());
 						}
 						if (ImGui::TableNextColumn()) // file type
 						{
-							ImGui::Text("%s", infos->fileExt.c_str());
+							ImGui::Text("%s", infosPtr->fileExt.c_str());
 						}
 						if (ImGui::TableNextColumn()) // file size
 						{
-							if (!infos->fileType.isDir())
+							if (!infosPtr->fileType.isDir())
 							{
-								ImGui::Text("%s ", infos->formatedFileSize.c_str());
+								ImGui::Text("%s ", infosPtr->formatedFileSize.c_str());
 							}
 							else
 							{
@@ -4805,15 +4743,15 @@ namespace IGFD
 						}
 						if (ImGui::TableNextColumn()) // file date + time
 						{
-							ImGui::Text("%s", infos->fileModifDate.c_str());
+							ImGui::Text("%s", infosPtr->fileModifDate.c_str());
 						}
 						if (ImGui::TableNextColumn()) // file thumbnails
 						{
-							auto th = &infos->thumbnailInfo;
+							auto th = &infosPtr->thumbnailInfo;
 
 							if (!th->isLoadingOrLoaded)
 							{
-								prAddThumbnailToLoad(infos);
+								prAddThumbnailToLoad(infosPtr);
 							}
 							if (th->isReadyToDisplay &&
 								th->textureID)
@@ -4852,12 +4790,63 @@ namespace IGFD
 
 	void IGFD::FileDialog::prDrawThumbnailsGridView(ImVec2 vSize)
 	{
+		auto& fdi = prFileDialogInternal.puFileManager;
+
+		ImGui::PushID(this);
+
 		if (ImGui::BeginChild("##thumbnailsGridsFiles", vSize))
 		{
-			// todo
-		}
+			if (!fdi.IsFilteredListEmpty())
+			{
+				std::string _str;
+				ImFont* _font = nullptr;
+				bool _showColor = false;
 
+				ImVec2 cell_size;
+				uint32_t thumbCountX = prCalcGridThumbsCountAndSize(prThumbnailsCountX, prThumbnailsWidth, cell_size);
+				if (thumbCountX)
+				{
+					uint32_t countThumbs = (uint32_t)fdi.GetFilteredListSize();
+					int rowCount = (int)std::ceil((double)countThumbs / (double)thumbCountX);
+					uint32_t idx = 0;
+					prFileListClipper.Begin(rowCount, cell_size.y);
+					while (prFileListClipper.Step())
+					{
+						for (int j = prFileListClipper.DisplayStart; j < prFileListClipper.DisplayEnd; j++)
+						{
+							if (j < 0) continue;
+
+							for (uint32_t i = 0; i < thumbCountX; i++)
+							{
+								uint32_t thumbIdx = i + j * thumbCountX;
+								if (thumbIdx < countThumbs)
+								{
+									uint32_t x = idx++ % thumbCountX;
+
+									if (x) ImGui::SameLine();
+
+									auto infosPtr = fdi.GetFilteredFileAt((size_t)thumbIdx);
+									if (!infosPtr)
+										continue;
+
+									prBeginFileColorIconStyle(infosPtr, _showColor, _str, &_font);
+
+									bool selected = fdi.IsFileNameSelected(infosPtr->fileNameExt); // found
+
+									prSelectableItem(thumbIdx, cell_size, infosPtr, selected, _str.c_str());
+
+									prEndFileColorIconStyle(_showColor, _font);
+								}
+							}
+						}
+					}
+					prFileListClipper.End();
+				}
+			}
+		}
 		ImGui::EndChild();
+
+		ImGui::PopID();
 	}
 
 #endif
@@ -5066,6 +5055,331 @@ namespace IGFD
 
 		return false;
 	}
+}
+
+// this function is exactly the same as the ImGui Selectable except than the 
+// hovered state is true when hovered of by the vFlashing boolean (line 5188)
+bool IGFD::FileDialog::prFlashableSelectable(const char* label, bool selected,
+	ImGuiSelectableFlags flags, bool vFlashing, const ImVec2& size_arg)
+{
+	using namespace ImGui;
+
+	ImGuiWindow* window = GetCurrentWindow();
+	if (window->SkipItems)
+		return false;
+
+	ImGuiContext& g = *GImGui;
+	const ImGuiStyle& style = g.Style;
+
+	// Submit label or explicit size to ItemSize(), whereas ItemAdd() will submit a larger/spanning rectangle.
+	ImGuiID id = window->GetID(label);
+	ImVec2 label_size = CalcTextSize(label, NULL, true);
+	ImVec2 size(size_arg.x != 0.0f ? size_arg.x : label_size.x, size_arg.y != 0.0f ? size_arg.y : label_size.y);
+	ImVec2 pos = window->DC.CursorPos;
+	pos.y += window->DC.CurrLineTextBaseOffset;
+	ItemSize(size, 0.0f);
+
+	// Fill horizontal space
+	// We don't support (size < 0.0f) in Selectable() because the ItemSpacing extension would make explicitly right-aligned sizes not visibly match other widgets.
+	const bool span_all_columns = (flags & ImGuiSelectableFlags_SpanAllColumns) != 0;
+	const float min_x = span_all_columns ? window->ParentWorkRect.Min.x : pos.x;
+	const float max_x = span_all_columns ? window->ParentWorkRect.Max.x : window->WorkRect.Max.x;
+	if (size_arg.x == 0.0f || (flags & ImGuiSelectableFlags_SpanAvailWidth))
+		size.x = ImMax(label_size.x, max_x - min_x);
+
+	// Text stays at the submission position, but bounding box may be extended on both sides
+	const ImVec2 text_min = pos;
+	const ImVec2 text_max(min_x + size.x, pos.y + size.y);
+
+	// Selectables are meant to be tightly packed together with no click-gap, so we extend their box to cover spacing between selectable.
+	ImRect bb(min_x, pos.y, text_max.x, text_max.y);
+	if ((flags & ImGuiSelectableFlags_NoPadWithHalfSpacing) == 0)
+	{
+		const float spacing_x = span_all_columns ? 0.0f : style.ItemSpacing.x;
+		const float spacing_y = style.ItemSpacing.y;
+		const float spacing_L = IM_FLOOR(spacing_x * 0.50f);
+		const float spacing_U = IM_FLOOR(spacing_y * 0.50f);
+		bb.Min.x -= spacing_L;
+		bb.Min.y -= spacing_U;
+		bb.Max.x += (spacing_x - spacing_L);
+		bb.Max.y += (spacing_y - spacing_U);
+	}
+	//if (g.IO.KeyCtrl) { GetForegroundDrawList()->AddRect(bb.Min, bb.Max, IM_COL32(0, 255, 0, 255)); }
+
+	// Modify ClipRect for the ItemAdd(), faster than doing a PushColumnsBackground/PushTableBackground for every Selectable..
+	const float backup_clip_rect_min_x = window->ClipRect.Min.x;
+	const float backup_clip_rect_max_x = window->ClipRect.Max.x;
+	if (span_all_columns)
+	{
+		window->ClipRect.Min.x = window->ParentWorkRect.Min.x;
+		window->ClipRect.Max.x = window->ParentWorkRect.Max.x;
+	}
+
+	const bool disabled_item = (flags & ImGuiSelectableFlags_Disabled) != 0;
+	const bool item_add = ItemAdd(bb, id, NULL, disabled_item ? ImGuiItemFlags_Disabled : ImGuiItemFlags_None);
+	if (span_all_columns)
+	{
+		window->ClipRect.Min.x = backup_clip_rect_min_x;
+		window->ClipRect.Max.x = backup_clip_rect_max_x;
+	}
+
+	if (!item_add)
+		return false;
+
+	const bool disabled_global = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
+	if (disabled_item && !disabled_global) // Only testing this as an optimization
+		BeginDisabled();
+
+	// FIXME: We can standardize the behavior of those two, we could also keep the fast path of override ClipRect + full push on render only,
+	// which would be advantageous since most selectable are not selected.
+	if (span_all_columns && window->DC.CurrentColumns)
+		PushColumnsBackground();
+	else if (span_all_columns && g.CurrentTable)
+		TablePushBackgroundChannel();
+
+	// We use NoHoldingActiveID on menus so user can click and _hold_ on a menu then drag to browse child entries
+	ImGuiButtonFlags button_flags = 0;
+	if (flags & ImGuiSelectableFlags_NoHoldingActiveID) { button_flags |= ImGuiButtonFlags_NoHoldingActiveId; }
+	if (flags & ImGuiSelectableFlags_SelectOnClick) { button_flags |= ImGuiButtonFlags_PressedOnClick; }
+	if (flags & ImGuiSelectableFlags_SelectOnRelease) { button_flags |= ImGuiButtonFlags_PressedOnRelease; }
+	if (flags & ImGuiSelectableFlags_AllowDoubleClick) { button_flags |= ImGuiButtonFlags_PressedOnClickRelease | ImGuiButtonFlags_PressedOnDoubleClick; }
+	if (flags & ImGuiSelectableFlags_AllowItemOverlap) { button_flags |= ImGuiButtonFlags_AllowItemOverlap; }
+
+	const bool was_selected = selected;
+	bool hovered, held;
+	bool pressed = ButtonBehavior(bb, id, &hovered, &held, button_flags);
+
+	// Auto-select when moved into
+	// - This will be more fully fleshed in the range-select branch
+	// - This is not exposed as it won't nicely work with some user side handling of shift/control
+	// - We cannot do 'if (g.NavJustMovedToId != id) { selected = false; pressed = was_selected; }' for two reasons
+	//   - (1) it would require focus scope to be set, need exposing PushFocusScope() or equivalent (e.g. BeginSelection() calling PushFocusScope())
+	//   - (2) usage will fail with clipped items
+	//   The multi-select API aim to fix those issues, e.g. may be replaced with a BeginSelection() API.
+	if ((flags & ImGuiSelectableFlags_SelectOnNav) && g.NavJustMovedToId != 0 && g.NavJustMovedToFocusScopeId == window->DC.NavFocusScopeIdCurrent)
+		if (g.NavJustMovedToId == id)
+			selected = pressed = true;
+
+	// Update NavId when clicking or when Hovering (this doesn't happen on most widgets), so navigation can be resumed with gamepad/keyboard
+	if (pressed || (hovered && (flags & ImGuiSelectableFlags_SetNavIdOnHover)))
+	{
+		if (!g.NavDisableMouseHover && g.NavWindow == window && g.NavLayer == window->DC.NavLayerCurrent)
+		{
+			SetNavID(id, window->DC.NavLayerCurrent, window->DC.NavFocusScopeIdCurrent, WindowRectAbsToRel(window, bb)); // (bb == NavRect)
+			g.NavDisableHighlight = true;
+		}
+	}
+	if (pressed)
+		MarkItemEdited(id);
+
+	if (flags & ImGuiSelectableFlags_AllowItemOverlap)
+		SetItemAllowOverlap();
+
+	// In this branch, Selectable() cannot toggle the selection so this will never trigger.
+	if (selected != was_selected) //-V547
+		g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_ToggledSelection;
+
+	// Render
+	if ((held && (flags & ImGuiSelectableFlags_DrawHoveredWhenHeld)) 
+		|| vFlashing) // this function is copied jsut for that 
+		hovered = true;
+	if (hovered || selected)
+	{
+		const ImU32 col = GetColorU32((held && hovered) ? ImGuiCol_HeaderActive : hovered ? ImGuiCol_HeaderHovered : ImGuiCol_Header);
+		RenderFrame(bb.Min, bb.Max, col, false, 0.0f);
+	}
+	RenderNavHighlight(bb, id, ImGuiNavHighlightFlags_TypeThin | ImGuiNavHighlightFlags_NoRounding);
+
+	if (span_all_columns && window->DC.CurrentColumns)
+		PopColumnsBackground();
+	else if (span_all_columns && g.CurrentTable)
+		TablePopBackgroundChannel();
+
+	RenderTextClipped(text_min, text_max, label, NULL, &label_size, style.SelectableTextAlign, &bb, bb.GetWidth());
+
+	// Automatically close popups
+	if (pressed && (window->Flags & ImGuiWindowFlags_Popup) && !(flags & ImGuiSelectableFlags_DontClosePopups) && !(g.LastItemData.InFlags & ImGuiItemFlags_SelectableDontClosePopup))
+		CloseCurrentPopup();
+
+	if (disabled_item && !disabled_global)
+		EndDisabled();
+
+	IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
+	return pressed; //-V1020
+}
+
+
+// this function is exactly the same as the ImGui Selectable except than the 
+// hovered state is true when hovered of by the vFlashing boolean (line 5188)
+bool IGFD::FileDialog::prFlashableSelectable(std::shared_ptr<FileInfos> vInfosPtr, const char* label, bool selected,
+	ImGuiSelectableFlags flags, bool vFlashing, const ImVec2& size_arg)
+{
+	using namespace ImGui;
+
+	ImGuiWindow* window = GetCurrentWindow();
+	if (window->SkipItems)
+		return false;
+
+	ImGuiContext& g = *GImGui;
+	const ImGuiStyle& style = g.Style;
+
+	// Submit label or explicit size to ItemSize(), whereas ItemAdd() will submit a larger/spanning rectangle.
+	ImGuiID id = window->GetID(label);
+	ImVec2 label_size = CalcTextSize(label, NULL, true);
+	ImVec2 size(size_arg.x != 0.0f ? size_arg.x : label_size.x, size_arg.y != 0.0f ? size_arg.y : label_size.y);
+	ImVec2 pos = window->DC.CursorPos;
+	pos.y += window->DC.CurrLineTextBaseOffset;
+	ItemSize(size, 0.0f);
+
+	// Fill horizontal space
+	// We don't support (size < 0.0f) in Selectable() because the ItemSpacing extension would make explicitly right-aligned sizes not visibly match other widgets.
+	const bool span_all_columns = (flags & ImGuiSelectableFlags_SpanAllColumns) != 0;
+	const float min_x = span_all_columns ? window->ParentWorkRect.Min.x : pos.x;
+	const float max_x = span_all_columns ? window->ParentWorkRect.Max.x : window->WorkRect.Max.x;
+	if (size_arg.x == 0.0f || (flags & ImGuiSelectableFlags_SpanAvailWidth))
+		size.x = ImMax(label_size.x, max_x - min_x);
+
+	// Text stays at the submission position, but bounding box may be extended on both sides
+	const ImVec2 text_min = pos;
+	const ImVec2 text_max(min_x + size.x, pos.y + size.y);
+
+	// Selectables are meant to be tightly packed together with no click-gap, so we extend their box to cover spacing between selectable.
+	ImRect bb(min_x, pos.y, text_max.x, text_max.y);
+	if ((flags & ImGuiSelectableFlags_NoPadWithHalfSpacing) == 0)
+	{
+		const float spacing_x = span_all_columns ? 0.0f : style.ItemSpacing.x;
+		const float spacing_y = style.ItemSpacing.y;
+		const float spacing_L = IM_FLOOR(spacing_x * 0.50f);
+		const float spacing_U = IM_FLOOR(spacing_y * 0.50f);
+		bb.Min.x -= spacing_L;
+		bb.Min.y -= spacing_U;
+		bb.Max.x += (spacing_x - spacing_L);
+		bb.Max.y += (spacing_y - spacing_U);
+	}
+	//if (g.IO.KeyCtrl) { GetForegroundDrawList()->AddRect(bb.Min, bb.Max, IM_COL32(0, 255, 0, 255)); }
+
+	// Modify ClipRect for the ItemAdd(), faster than doing a PushColumnsBackground/PushTableBackground for every Selectable..
+	const float backup_clip_rect_min_x = window->ClipRect.Min.x;
+	const float backup_clip_rect_max_x = window->ClipRect.Max.x;
+	if (span_all_columns)
+	{
+		window->ClipRect.Min.x = window->ParentWorkRect.Min.x;
+		window->ClipRect.Max.x = window->ParentWorkRect.Max.x;
+	}
+
+	const bool disabled_item = (flags & ImGuiSelectableFlags_Disabled) != 0;
+	const bool item_add = ItemAdd(bb, id, NULL, disabled_item ? ImGuiItemFlags_Disabled : ImGuiItemFlags_None);
+	if (span_all_columns)
+	{
+		window->ClipRect.Min.x = backup_clip_rect_min_x;
+		window->ClipRect.Max.x = backup_clip_rect_max_x;
+	}
+
+	if (!item_add)
+		return false;
+
+	const bool disabled_global = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
+	if (disabled_item && !disabled_global) // Only testing this as an optimization
+		BeginDisabled();
+
+	// FIXME: We can standardize the behavior of those two, we could also keep the fast path of override ClipRect + full push on render only,
+	// which would be advantageous since most selectable are not selected.
+	if (span_all_columns && window->DC.CurrentColumns)
+		PushColumnsBackground();
+	else if (span_all_columns && g.CurrentTable)
+		TablePushBackgroundChannel();
+
+	// We use NoHoldingActiveID on menus so user can click and _hold_ on a menu then drag to browse child entries
+	ImGuiButtonFlags button_flags = 0;
+	if (flags & ImGuiSelectableFlags_NoHoldingActiveID) { button_flags |= ImGuiButtonFlags_NoHoldingActiveId; }
+	if (flags & ImGuiSelectableFlags_SelectOnClick) { button_flags |= ImGuiButtonFlags_PressedOnClick; }
+	if (flags & ImGuiSelectableFlags_SelectOnRelease) { button_flags |= ImGuiButtonFlags_PressedOnRelease; }
+	if (flags & ImGuiSelectableFlags_AllowDoubleClick) { button_flags |= ImGuiButtonFlags_PressedOnClickRelease | ImGuiButtonFlags_PressedOnDoubleClick; }
+	if (flags & ImGuiSelectableFlags_AllowItemOverlap) { button_flags |= ImGuiButtonFlags_AllowItemOverlap; }
+
+	const bool was_selected = selected;
+	bool hovered, held;
+	bool pressed = ButtonBehavior(bb, id, &hovered, &held, button_flags);
+
+	// Auto-select when moved into
+	// - This will be more fully fleshed in the range-select branch
+	// - This is not exposed as it won't nicely work with some user side handling of shift/control
+	// - We cannot do 'if (g.NavJustMovedToId != id) { selected = false; pressed = was_selected; }' for two reasons
+	//   - (1) it would require focus scope to be set, need exposing PushFocusScope() or equivalent (e.g. BeginSelection() calling PushFocusScope())
+	//   - (2) usage will fail with clipped items
+	//   The multi-select API aim to fix those issues, e.g. may be replaced with a BeginSelection() API.
+	if ((flags & ImGuiSelectableFlags_SelectOnNav) && g.NavJustMovedToId != 0 && g.NavJustMovedToFocusScopeId == window->DC.NavFocusScopeIdCurrent)
+		if (g.NavJustMovedToId == id)
+			selected = pressed = true;
+
+	// Update NavId when clicking or when Hovering (this doesn't happen on most widgets), so navigation can be resumed with gamepad/keyboard
+	if (pressed || (hovered && (flags & ImGuiSelectableFlags_SetNavIdOnHover)))
+	{
+		if (!g.NavDisableMouseHover && g.NavWindow == window && g.NavLayer == window->DC.NavLayerCurrent)
+		{
+			SetNavID(id, window->DC.NavLayerCurrent, window->DC.NavFocusScopeIdCurrent, WindowRectAbsToRel(window, bb)); // (bb == NavRect)
+			g.NavDisableHighlight = true;
+		}
+	}
+	if (pressed)
+		MarkItemEdited(id);
+
+	if (flags & ImGuiSelectableFlags_AllowItemOverlap)
+		SetItemAllowOverlap();
+
+	// In this branch, Selectable() cannot toggle the selection so this will never trigger.
+	if (selected != was_selected) //-V547
+		g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_ToggledSelection;
+
+#ifdef USE_THUMBNAILS
+	// icon
+	if (vInfosPtr && 
+		prDisplayMode == DisplayModeEnum::THUMBNAILS_GRID && 
+		!(prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_DisableThumbnailMode))
+	{
+		const auto& th = vInfosPtr->thumbnailInfo;
+		if (!th.isLoadingOrLoaded)
+		{
+			prAddThumbnailToLoad(vInfosPtr);
+		}
+		if (th.isReadyToDisplay && th.textureID)
+		{
+			window->DrawList->AddImage((ImTextureID)th.textureID, bb.Min, bb.Min + ImVec2((float)th.textureWidth, (float)th.textureHeight));
+		}
+		else
+		{
+			//vInfosPtr->
+		}
+	}
+#endif // USE_THUMBNAILS)
+
+	// Render
+	if ((held && (flags & ImGuiSelectableFlags_DrawHoveredWhenHeld))
+		|| vFlashing) // this function is copied jsut for that 
+		hovered = true;
+	if (hovered || selected)
+	{
+		const ImU32 col = GetColorU32((held && hovered) ? ImGuiCol_HeaderActive : hovered ? ImGuiCol_HeaderHovered : ImGuiCol_Header);
+		RenderFrame(bb.Min, bb.Max, col, false, 0.0f);
+	}
+	RenderNavHighlight(bb, id, ImGuiNavHighlightFlags_TypeThin | ImGuiNavHighlightFlags_NoRounding);
+
+	if (span_all_columns && window->DC.CurrentColumns)
+		PopColumnsBackground();
+	else if (span_all_columns && g.CurrentTable)
+		TablePopBackgroundChannel();
+
+	RenderTextClipped(text_min, text_max, label, NULL, &label_size, style.SelectableTextAlign, &bb, bb.GetWidth());
+
+	// Automatically close popups
+	if (pressed && (window->Flags & ImGuiWindowFlags_Popup) && !(flags & ImGuiSelectableFlags_DontClosePopups) && !(g.LastItemData.InFlags & ImGuiItemFlags_SelectableDontClosePopup))
+		CloseCurrentPopup();
+
+	if (disabled_item && !disabled_global)
+		EndDisabled();
+
+	IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
+	return pressed; //-V1020
 }
 
 #endif // __cplusplus

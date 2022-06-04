@@ -1289,23 +1289,30 @@ namespace IGFD
 		DestroyThumbnailFun prDestroyThumbnailFun = nullptr;
 
 	protected:
-		DisplayModeEnum prDisplayMode = DisplayModeEnum::FILE_LIST;
+		DisplayModeEnum prDisplayMode = DisplayModeEnum::FILE_LIST;						// display mode, (file list, thumb list, grid) 
+		bool prGridModeWidthPolicieLeading = true;										// grid mode display arangement width policie is leading
+		bool prThumbWidthChangedFromWidgetUse = false;									// say is the size change was from widget use or not
+		float prThumbnailsWidth = 100.0f;												// prefred thumb display width
+		int32_t prThumbnailsCountX = 5;													// prefered thumb column count
+		float prPreferedTrueTextureHeight = 100.0f;
 
 	protected:
 		// will be call in cpu zone (imgui computations, will call a texture file retrieval thread)
-		void prStartThumbnailFileDatasExtraction();								// start the thread who will get byte buffer from image files
-		bool prStopThumbnailFileDatasExtraction();								// stop the thread who will get byte buffer from image files
-		void prThreadThumbnailFileDatasExtractionFunc();						// the thread who will get byte buffer from image files
-		void prDrawThumbnailGenerationProgress();								// a little progressbar who will display the texture gen status
+		void prStartThumbnailFileDatasExtraction();										// start the thread who will get byte buffer from image files
+		bool prStopThumbnailFileDatasExtraction();										// stop the thread who will get byte buffer from image files
+		void prThreadThumbnailFileDatasExtractionFunc();								// the thread who will get byte buffer from image files
+		void prDrawThumbnailGenerationProgress();										// a little progressbar who will display the texture gen status
+		void prDrawThumbnailGridSliders();												// draw slider for tune the grid view
 		void prAddThumbnailToLoad(const std::shared_ptr<FileInfos>& vFileInfos);		// add texture to load in the thread
-		void prAddThumbnailToCreate(const std::shared_ptr<FileInfos>& vFileInfos);
-		void prAddThumbnailToDestroy(const IGFD_Thumbnail_Info& vIGFD_Thumbnail_Info);
-		void prDrawDisplayModeToolBar();										// draw display mode toolbar (file list, thumbnails list, small thumbnails grid, big thumbnails grid)
-		void prClearThumbnails(FileDialogInternal& vFileDialogInternal);
-
+		void prAddThumbnailToCreate(const std::shared_ptr<FileInfos>& vFileInfos);		// will create a thumbnail called in gpu zone
+		void prAddThumbnailToDestroy(const IGFD_Thumbnail_Info& vIGFD_Thumbnail_Info);	// will destroy a thumbnail called in gpu zone
+		void prDrawDisplayModeToolBar();												// draw display mode toolbar (file list, thumbnails list, small thumbnails grid, big thumbnails grid)
+		void prClearThumbnails(FileDialogInternal& vFileDialogInternal);				// will destroy textures
+		int32_t prCalcGridThumbsCountAndSize(int32_t vThumbsCountX,	float vThumbsWidth,		// will compute thumb size and count regarding GridModePolicyEnum
+			ImVec2& vCellSize);
 	public:
-		void SetCreateThumbnailCallback(const CreateThumbnailFun& vCreateThumbnailFun);
-		void SetDestroyThumbnailCallback(const DestroyThumbnailFun& vCreateThumbnailFun);
+		void SetCreateThumbnailCallback(const CreateThumbnailFun& vCreateThumbnailFun);		// create texture callback in gpu zone
+		void SetDestroyThumbnailCallback(const DestroyThumbnailFun& vCreateThumbnailFun);	// destroy texture callback in gpu zone
 		
 		// must be call in gpu zone (rendering, possibly one rendering thread)
 		void ManageGPUThumbnails();	// in gpu rendering zone, whill create or destroy texture
@@ -1384,9 +1391,6 @@ namespace IGFD
 		void prLocateByInputKey(FileDialogInternal& vFileDialogInternal);						// select a file line in listview according to char key
 		bool prLocateItem_Loop(FileDialogInternal& vFileDialogInternal, ImWchar vC);			// restrat for start of list view if not found a corresponding file
 		void prExploreWithkeys(FileDialogInternal& vFileDialogInternal, ImGuiID vListViewID);	// select file/directory line in listview accroding to up/down enter/backspace keys
-		static bool prFlashableSelectable(																// custom flashing selectable widgets, for flash the selected line in a short time
-			const char* label, bool selected = false, ImGuiSelectableFlags flags = 0,
-			bool vFlashing = false, const ImVec2& size = ImVec2(0, 0));
 		void prStartFlashItem(size_t vIdx);														// define than an item must be flashed
 		bool prBeginFlashItem(size_t vIdx);														// start the flashing of a line in lsit view
 		static void prEndFlashItem();																	// end the fleshing accrdoin to var prFlashAlphaAttenInSecs
@@ -1615,6 +1619,16 @@ namespace IGFD
 		bool prConfirm_Or_OpenOverWriteFileDialog_IfNeeded(
 			bool vLastAction, ImGuiWindowFlags vFlags);				// treatment of the result, start the confirm to overwrite dialog if needed (if defined with flag)
 	
+		// custom flashing selectable widgets, for flash the selected line in a short time
+		bool prFlashableSelectable(
+			const char* label, bool selected = false, ImGuiSelectableFlags flags = 0,
+			bool vFlashing = false, const ImVec2& size = ImVec2(0, 0));
+
+		// custom flashing selectable widgets, for flash the selected line in a short time
+		bool prFlashableSelectable(
+			std::shared_ptr<FileInfos> vInfosPtr, const char* label, bool selected = false, ImGuiSelectableFlags flags = 0,
+			bool vFlashing = false, const ImVec2& size = ImVec2(0, 0));
+
 	public:
 		// dialog parts
 		virtual void prDrawHeader();								// draw header part of the dialog (bookmark btn, dir creation, path composer, search bar)
@@ -1629,9 +1643,12 @@ namespace IGFD
 		virtual bool prDrawOkButton();								// draw ok button
 		virtual bool prDrawCancelButton();							// draw cancel button
 		virtual void prDrawSidePane(float vHeight);					// draw side pane
-		virtual void prSelectableItem(int vidx, 
-			std::shared_ptr<FileInfos> vInfos, 
-			bool vSelected, const char* vFmt, ...);					// draw a custom selectable behavior item
+		virtual void prSelectableItem(
+			const int& vidx, 
+			const ImVec2& vCellSize, 
+			std::shared_ptr<FileInfos> vInfosPtr, 
+			const bool& vSelected, 
+			const char* vFmt, ...);					// draw a custom selectable behavior item
 		virtual void prDrawFileListView(ImVec2 vSize);				// draw file list view (default mode)
 
 #ifdef USE_THUMBNAILS
