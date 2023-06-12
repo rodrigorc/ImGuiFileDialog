@@ -1787,11 +1787,14 @@ IGFD_C_API ImGuiFileDialog* IGFD_Create(void);            // create the filedial
 IGFD_C_API void IGFD_Destroy(ImGuiFileDialog* vContext);  // destroy the filedialog context
 
 typedef void (*IGFD_PaneFun)(const char*, void*, bool*);  // callback fucntion for display the pane
+typedef void (*IGFD_DrawFooterFun)(ImGuiFileDialog* vContext);  // callback fucntion to personalize the footer
 
 #ifdef USE_THUMBNAILS
 typedef void (*IGFD_CreateThumbnailFun)(IGFD_Thumbnail_Info*);   // callback function for create thumbnail texture
 typedef void (*IGFD_DestroyThumbnailFun)(IGFD_Thumbnail_Info*);  // callback fucntion for destroy thumbnail texture
 #endif                                                           // USE_THUMBNAILS
+
+IGFD_C_API void IGFD_SetDrawFooter(ImGuiFileDialog* vContext, IGFD_DrawFooterFun vDrawFooter);
 
 IGFD_C_API void IGFD_OpenDialog(   // open a standard dialog
     ImGuiFileDialog* vContext,     // ImGuiFileDialog context

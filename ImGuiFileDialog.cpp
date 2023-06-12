@@ -4173,8 +4173,20 @@ IGFD_C_API void IGFD_Selection_DestroyContent(IGFD_Selection* vSelection) {
     }
 }
 
+class ImGuiFileDialogForC: public ImGuiFileDialog {
+public:
+    IGFD_DrawFooterFun vDrawFooter = nullptr;
+protected:
+    virtual bool prDrawFooter() {
+        bool res = ImGuiFileDialog::prDrawFooter();
+        if (vDrawFooter)
+            vDrawFooter(this);
+        return res;
+    }
+};
+
 // create an instance of ImGuiFileDialog
-IGFD_C_API ImGuiFileDialog* IGFD_Create(void) { return new ImGuiFileDialog(); }
+IGFD_C_API ImGuiFileDialog* IGFD_Create(void) { return new ImGuiFileDialogForC(); }
 
 // destroy the instance of ImGuiFileDialog
 IGFD_C_API void IGFD_Destroy(ImGuiFileDialog* vContext) {
@@ -4182,6 +4194,10 @@ IGFD_C_API void IGFD_Destroy(ImGuiFileDialog* vContext) {
         delete vContext;
         vContext = nullptr;
     }
+}
+
+IGFD_C_API void IGFD_SetDrawFooter(ImGuiFileDialog* vContext, IGFD_DrawFooterFun vDrawFooter) {
+    if (vContext) { ((ImGuiFileDialogForC*)vContext)->vDrawFooter = vDrawFooter; }
 }
 
 // standard dialog
