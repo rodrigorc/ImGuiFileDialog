@@ -4039,6 +4039,15 @@ IGFD_API bool IGFD::FileDialog::prDrawValidationButtons() {
 
     prOkCancelButtonWidth = ImGui::GetItemRectSize().x;
 
+    if (prFileDialogInternal.puDLGflags & ImGuiFileDialogFlags_ShowReadOnlyCheck) {
+        ImGui::SameLine();
+        float posX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - prFileDialogInternal.puReadonlyCheckWidth;
+        ImGui::SetCursorPosX(posX);
+        ImGui::Checkbox("Open read-only", &prFileDialogInternal.puIsReadonly);
+        prFileDialogInternal.puReadonlyCheckWidth = ImGui::GetItemRectSize().x;
+    }
+
+
     return res;
 }
 
@@ -4666,6 +4675,8 @@ IGFD_API IGFD::UserDatas IGFD::FileDialog::GetUserDatas() const { return prFileD
 
 IGFD_API bool IGFD::FileDialog::IsOk() const { return prFileDialogInternal.puIsOk; }
 
+IGFD_API bool IGFD::FileDialog::IsReadonly() const { return prFileDialogInternal.puIsReadonly; }
+
 IGFD_API void IGFD::FileDialog::SetFileStyle(
     const IGFD_FileStyleFlags& vFlags, const char* vCriteria, const FileStyle& vInfos) {
     prFileDialogInternal.puFilterManager.SetFileStyle(vFlags, vCriteria, vInfos);
@@ -4904,6 +4915,14 @@ IGFD_C_API void IGFD_CloseDialog(ImGuiFileDialog* vContextPtr) {
     if (vContextPtr) {
         vContextPtr->Close();
     }
+}
+
+IGFD_C_API bool IGFD_IsReadonly(ImGuiFileDialog* vContext) {
+    if (vContext) {
+        return vContext->IsReadonly();
+    }
+
+    return false;
 }
 
 IGFD_C_API bool IGFD_IsOk(ImGuiFileDialog* vContextPtr) {

@@ -1153,6 +1153,8 @@ enum ImGuiFileDialogFlags_ {
     ImGuiFileDialogFlags_DisableThumbnailMode = (1 << 10),       // disable the thumbnail mode
     ImGuiFileDialogFlags_DisableBookmarkMode = (1 << 11),        // disable the bookmark mode
     ImGuiFileDialogFlags_DisableQuickPathSelection = (1 << 12),  // disable the quick path selection
+    ImGuiFileDialogFlags_ShowReadOnlyCheck = (1 << 13),    // Show a "read only" checkbox next to ok/cancel buttons
+
 
     // default behavior when no flags is defined. seems to be the more common cases
     ImGuiFileDialogFlags_Default = ImGuiFileDialogFlags_ConfirmOverwrite |  //
@@ -1785,6 +1787,8 @@ public:
     PaneFun puDLGoptionsPane = nullptr;                           // the user side pane
     float puDLGoptionsPaneWidth = 0.0f;                           // the user side pane width
     bool puNeedToExitDialog = false;                              // we need to exit the dialog
+    bool puIsReadonly = false;
+    float puReadonlyCheckWidth = 0.0f;
     bool puUseCustomLocale = false;                               // custom user locale
     int puLocaleCategory = LC_ALL;                                // locale category to use
     std::string puLocaleBegin;  // the locale who will be applied at start of the display dialog
@@ -2047,6 +2051,7 @@ public:
 
     // get result
     bool IsOk() const;  // true => Dialog Closed with Ok result / false : Dialog closed with cancel result
+    bool IsReadonly() const;
     std::map<std::string, std::string> GetSelection(
         IGFD_ResultMode vFlag = IGFD_ResultMode_KeepInputFile);  // Open File behavior : will return selection via a
                                                                  // map<FileName, FilePathName>
@@ -2255,6 +2260,9 @@ IGFD_C_API void IGFD_CloseDialog(   // Close the dialog
 
 IGFD_C_API bool IGFD_IsOk(          // true => Dialog Closed with Ok result / false : Dialog closed with cancel result
     ImGuiFileDialog* vContextPtr);  // ImGuiFileDialog context
+
+IGFD_C_API bool IGFD_IsReadonly(
+       ImGuiFileDialog* vContext);
 
 IGFD_C_API bool IGFD_WasKeyOpenedThisFrame(  // say if the dialog key was already opened this frame
     ImGuiFileDialog* vContextPtr,            // ImGuiFileDialog context
