@@ -1829,22 +1829,8 @@ IGFD_API void IGFD::FileManager::ScanDir(const FileDialogInternal& vFileDialogIn
                 switch (ent->d_type) {
                     case DT_DIR: fileType.SetContent(FileType::ContentType::Directory); break;
                     case DT_REG: fileType.SetContent(FileType::ContentType::File); break;
-#if DT_LNK != DT_UNKNOWN
-                    case DT_LNK: {
-                        fileType.SetSymLink(true);
-                        fileType.SetContent(FileType::ContentType::LinkToUnknown);  // by default if we can't figure out
-                                                                                    // the target type.
-                        struct stat statInfos = {};
-                        int result = stat((path + PATH_SEP + ent->d_name).c_str(), &statInfos);
-                        if (result == 0) {
-                            if (statInfos.st_mode & S_IFREG) {
-                                fileType.SetContent(FileType::ContentType::File);
-                            } else if (statInfos.st_mode & S_IFDIR) {
-                                fileType.SetContent(FileType::ContentType::Directory);
-                            }
-                        }
-                        break;
-                    }
+#if defined(_IGFD_UNIX_) || (DT_LNK != DT_UNKNOWN)
+                    case DT_LNK:
 #endif
                     case DT_UNKNOWN: {
                         struct stat sb = {};
